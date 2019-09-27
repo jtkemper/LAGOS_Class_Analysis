@@ -1,8 +1,10 @@
 ---
 title: "Lake Water Quality Analysis"
-author: "Matthew Ross"
-date: "9/17/2019"
+author: "John Kemper"
+date: "9/25/2019"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 
@@ -14,6 +16,9 @@ library(mapview) #Interactive maps
 library(LAGOSNE) #Lots and lots of clean lake data
 library(USAboundaries) #USA states and counties
 library(lubridate) #For dealing with date and time
+library(ggplot2) ##ggplot
+library(ggthemes) ##themes in ggplot
+
 ```
 
 
@@ -29,7 +34,7 @@ library(lubridate) #For dealing with date and time
 lagosne_get(dest_folder = LAGOSNE:::lagos_path())
 
 #Load in lagos
-lagos <- lagosne_load('1.087.1')
+lagos <- lagosne_load()
 
 
 #Grab the lake centroid info
@@ -52,7 +57,9 @@ nutr <- lagos$epi_nutr
 ```{r}
 clarity_only <- nutr %>%
   select(lagoslakeid,sampledate,chla,doc,secchi) %>%
-  mutate(sampledate = as.character(sampledate) %>% mdy(.))
+  mutate(sampledate = as.character(sampledate) %>% ymd(.))
+
+head(clarity_only)
 
 ```
 
@@ -61,24 +68,25 @@ clarity_only <- nutr %>%
 
 ```{r}
 
+
 #Look at the number of rows of dataset
-#nrow(clarity_only)
+nrow(clarity_only)
 
 chla_secchi <- clarity_only %>%
   filter(!is.na(chla),
          !is.na(secchi))
-
-# How many observatiosn did we lose?
-# nrow(clarity_only) - nrow(chla_secchi)
+head(chla_secchi)
+# How many observatiosn did we lose? - We lost 89715 observations
+nrow(clarity_only) - nrow(chla_secchi)
 
 
 # Keep only the lakes with at least 200 observations of secchi and chla
-chla_secchi_200 <- clarity_only %>%
+chla_secchi_200 <- chla_secchi %>%
   group_by(lagoslakeid) %>%
   mutate(count = n()) %>%
-  filter(count > 200)
+  filter(count > 200) 
 
-
+# chla_secchi_200
 ```
 
 
@@ -89,6 +97,7 @@ spatial_200 <- inner_join(spatial_lakes,chla_secchi_200 %>%
                             distinct(lagoslakeid,.keep_all=T),
                           by='lagoslakeid')
 
+mapview(spatial_200)
 
 ```
 
@@ -97,42 +106,53 @@ spatial_200 <- inner_join(spatial_lakes,chla_secchi_200 %>%
 ```{r}
 ### Take the mean chl_a and secchi by lake
 
-mean_values_200 <- chla_secchi_200 %>%
-  # Take summary by lake id
+mean_values_200 <- chla_secchi_200 %>% 
   group_by(lagoslakeid) %>%
-  # take mean chl_a per lake id
-  summarize(mean_chl = mean(chla,na.rm=T),
-            mean_secchi=mean(secchi,na.rm=T)) %>%
-  #Get rid of NAs
-  filter(!is.na(mean_chl),
+  summarise(mean_chla = mean(chla, na.rm = TRUE),
+            mean_secchi = mean(secchi), na.rm = TRUE) %>%
+  filter(!is.na(mean_chla),
          !is.na(mean_secchi)) %>%
-  # Take the log base 10 of the mean_chl
-  mutate(log10_mean_chl = log10(mean_chl))
+  mutate(log10_mean_chla = log10(mean_chla))
+
+
 
 #Join datasets
 mean_spatial <- inner_join(spatial_lakes,mean_values_200,
                           by='lagoslakeid') 
 
 #Make a map
-mapview(mean_spatial,zcol='log10_mean_chl')
+mapview(mean_spatial,zcol='log10_mean_chla')
 ```
 
 
 # Class work
 
-## 3) What is the correlation between Secchi Disk Depth and Chlorophyll a for
+## 1) What is the correlation between Secchi Disk Depth and Chlorophyll a for
 sites with at least 200 observations?
 
 - Here, I just want a plot of chla vs secchi for all sites 
 
 ```{r}
-#Your code here
+
+###plot chla vs secchi
+mean_values_200 %>%
+  ggplot(., aes( x= mean_secchi, y = log10_mean_chla)) +
+  geom_point(size = 3, shape = 17, color = "forestgreen") +
+  theme_few() +
+  theme(text = element_text(size = 16, color = "black")) +
+  xlab("Mean Secchi Disk Depth (m)") +
+  ylab("Log Mean Chlorophyll Conc. (mg/L)")
 
 
 ```
 
 
 ## Why might this be the case? 
+
+```{r}
+### The deeper the depth the less sunlight, so the less the chlorophyll concentration
+```
+
 
 
 ## 2) What states have the most data? 
@@ -141,8 +161,10 @@ sites with at least 200 observations?
 number of counts per site.
 
 ```{r}
+###Count number of  measurements per lake
+chla_secchi_obs <- chla_secchi %>%
+  mutate(count = n())
 
-## Your code here
 ```
 
 
@@ -150,7 +172,19 @@ number of counts per site.
 data. 
 
 ```{r}
-## Your code here
+
+###join the data on chla and secchi observations to spatial lake dataset
+ch_sech_spatial <- inner_join(spatial_lakes, chla_secchi_obs %>%
+                            distinct(lagoslakeid,.keep_all=T),
+                          by='lagoslakeid') %>% st_transform(2163)
+
+states <- us_states() %>%
+  st_transform(2163)
+
+###join the spatial observation data set created above to the state data set in order to associate observation 
+###count with a state
+state_obs <- st_join(ch_sech_spatial, states)
+
 ```
 
 
@@ -158,14 +192,33 @@ data.
 state and arrange that data from most to least toatl observations per state. 
 
 ```{r}
-## Your code here. 
-```
+View(state_obs)
 
+###Group observations by state and arrange the list from most to least observations
+total_obs <- state_obs %>%
+  group_by(name) %>%
+  summarise(n = n()) %>%
+  arrange(desc(n)) %>%
+  select("name", "n")
+
+head(total_obs)
+
+####Minnesota has the most observations
+```
+?desc
 ##3 Is there a spatial pattern in Secchi disk depth for lakes with at least 200 
 observations?
 
 ```{r}
-## Your code here
+
+names(mean_spatial)
+
+###map the mean secchi disk depth for lakes with at least 200 observations
+mapview(mean_spatial, zcol = "mean_secchi")
+
+####Lakes in New England appear to have a larger (i.e. deeper) mean Secchi disk depth than lakes in the Midwest 
+
+
 
 ```
 
